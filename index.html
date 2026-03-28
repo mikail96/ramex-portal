@@ -350,7 +350,7 @@ function App() {
     csv += "Talep Tarihi;Magaza;Urun Adi;Birim;Miktar;Durum\n";
     approved.forEach(o => {
       var dt = new Date(o.approvedDate || o.date);
-      var tarih = ("0"+dt.getDate()).slice(-2) + "." + ("0"+(dt.getMonth()+1)).slice(-2) + "." + dt.getFullYear() + " " + ("0"+dt.getHours()).slice(-2) + ":" + ("0"+dt.getMinutes()).slice(-2);
+      var tarih = '="' + ("0"+dt.getDate()).slice(-2) + "." + ("0"+(dt.getMonth()+1)).slice(-2) + "." + dt.getFullYear() + '"';
       o.items.forEach(item => {
         csv += tarih + ";" + o.storeName + ";" + item.name + ";" + item.unit + ";" + item.qty + ";Onaylandi\n";
       });
