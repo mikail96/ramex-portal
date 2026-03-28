@@ -299,6 +299,12 @@ function App() {
     else delete n[idx];
     return n;
   });
+  const setCartQty = (idx, qty) => setCart(c => {
+    const n = { ...c };
+    if (qty > 0) n[idx] = qty;
+    else delete n[idx];
+    return n;
+  });
   const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
   const cartItems = Object.entries(cart).map(([idx, qty]) => ({ ...products[idx], idx: +idx, qty }));
 
@@ -324,16 +330,26 @@ function App() {
     }, 800);
   };
 
-  // Depo: approve order
-  const approveOrder = (orderId, removedItems = []) => {
+  // Depo: approve order with adjusted quantities
+  const approveOrder = (orderId, adjustedQtys) => {
     const newOrders = orders.map(o => {
       if (o.id === orderId) {
+        var approved = [];
+        var removed = [];
+        o.items.forEach(item => {
+          var newQty = adjustedQtys.hasOwnProperty(item.name) ? adjustedQtys[item.name] : item.qty;
+          if (newQty > 0) {
+            approved.push({ name: item.name, unit: item.unit, qty: newQty, category: item.category, originalQty: item.qty });
+          } else {
+            removed.push(item);
+          }
+        });
         return {
           ...o,
           status: "approved",
           approvedDate: new Date().toISOString(),
-          items: o.items.filter(item => !removedItems.includes(item.name)),
-          removedItems: o.items.filter(item => removedItems.includes(item.name)),
+          items: approved,
+          removedItems: removed,
         };
       }
       return o;
@@ -654,7 +670,7 @@ function App() {
                 ) : (
                   filtered.map((p, fi) => {
                     const realIdx = products.indexOf(p);
-                    return <ProductCard key={realIdx} p={p} idx={realIdx} cart={cart} add={addToCart} remove={removeFromCart} />;
+                    return <ProductCard key={realIdx} p={p} idx={realIdx} cart={cart} add={addToCart} remove={removeFromCart} setQty={setCartQty} />;
                   })
                 )
               ) : (
@@ -671,7 +687,7 @@ function App() {
                     const catName = (allCategories[activeCat] && allCategories[activeCat].name);
                     return products.map((p, idx) => {
                       if (p.category !== catName) return null;
-                      return <ProductCard key={idx} p={p} idx={idx} cart={cart} add={addToCart} remove={removeFromCart} />;
+                      return <ProductCard key={idx} p={p} idx={idx} cart={cart} add={addToCart} remove={removeFromCart} setQty={setCartQty} />;
                     });
                   })()}
                 </>
@@ -694,21 +710,7 @@ function App() {
             ) : (
               <>
                 {cartItems.map(item => (
-                  <div key={item.idx} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "14px 16px", background: cardBg, borderRadius: 12,
-                    marginBottom: 8, border: `1px solid ${border}`,
-                  }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{item.name}</div>
-                      <div style={{ fontSize: 12, color: textSub }}>{item.unit}</div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <QtyButton onClick={() => removeFromCart(item.idx)} label="−" />
-                      <span style={{ fontSize: 16, fontWeight: 700, width: 28, textAlign: "center" }}>{item.qty}</span>
-                      <QtyButton onClick={() => addToCart(item.idx)} label="+" color={green} />
-                    </div>
-                  </div>
+                  <CartItemRow key={item.idx} item={item} add={addToCart} remove={removeFromCart} setQty={setCartQty} />
                 ))}
 
                 <button onClick={submitOrder} disabled={submitAnim}
@@ -1140,8 +1142,10 @@ function App() {
 
 // ─── COMPONENTS ───
 
-function ProductCard({ p, idx, cart, add, remove }) {
+function ProductCard({ p, idx, cart, add, remove, setQty }) {
   const qty = cart[idx] || 0;
+  const [editing, setEditing] = useState(false);
+  const [tempVal, setTempVal] = useState("");
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -1161,13 +1165,68 @@ function ProductCard({ p, idx, cart, add, remove }) {
         {qty > 0 && (
           <>
             <QtyButton onClick={() => remove(idx)} label="−" />
-            <span style={{
-              fontSize: 15, fontWeight: 700, width: 26, textAlign: "center",
-              color: green,
-            }}>{qty}</span>
+            {editing ? (
+              <input type="number" value={tempVal}
+                autoFocus
+                onChange={e => setTempVal(e.target.value)}
+                onBlur={() => { var v = parseInt(tempVal); setQty(idx, v > 0 ? v : 0); setEditing(false); }}
+                onKeyDown={e => { if (e.key === "Enter") { var v = parseInt(tempVal); setQty(idx, v > 0 ? v : 0); setEditing(false); } }}
+                style={{
+                  width: 48, height: 32, textAlign: "center", borderRadius: 8,
+                  border: "1px solid " + gold, background: darkBg, color: green,
+                  fontSize: 15, fontWeight: 700, fontFamily: font,
+                }} />
+            ) : (
+              <span onClick={() => { setTempVal(String(qty)); setEditing(true); }}
+                style={{
+                  fontSize: 15, fontWeight: 700, minWidth: 32, textAlign: "center",
+                  color: green, cursor: "pointer", padding: "4px 2px",
+                  borderBottom: "1px dashed " + green + "50",
+                }}>{qty}</span>
+            )}
           </>
         )}
         <QtyButton onClick={() => add(idx)} label="+" color={green} />
+      </div>
+    </div>
+  );
+}
+
+function CartItemRow({ item, add, remove, setQty }) {
+  const [editing, setEditing] = useState(false);
+  const [tempVal, setTempVal] = useState("");
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "14px 16px", background: cardBg, borderRadius: 12,
+      marginBottom: 8, border: "1px solid " + border,
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{item.name}</div>
+        <div style={{ fontSize: 12, color: textSub }}>{item.unit}</div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <QtyButton onClick={() => remove(item.idx)} label="−" />
+        {editing ? (
+          <input type="number" value={tempVal}
+            autoFocus
+            onChange={e => setTempVal(e.target.value)}
+            onBlur={() => { var v = parseInt(tempVal); setQty(item.idx, v > 0 ? v : 0); setEditing(false); }}
+            onKeyDown={e => { if (e.key === "Enter") { var v = parseInt(tempVal); setQty(item.idx, v > 0 ? v : 0); setEditing(false); } }}
+            style={{
+              width: 52, height: 34, textAlign: "center", borderRadius: 8,
+              border: "1px solid " + gold, background: darkBg, color: green,
+              fontSize: 16, fontWeight: 700, fontFamily: font,
+            }} />
+        ) : (
+          <span onClick={() => { setTempVal(String(item.qty)); setEditing(true); }}
+            style={{
+              fontSize: 16, fontWeight: 700, minWidth: 34, textAlign: "center",
+              cursor: "pointer", padding: "4px 2px",
+              borderBottom: "1px dashed " + gold + "50",
+            }}>{item.qty}</span>
+        )}
+        <QtyButton onClick={() => add(item.idx)} label="+" color={green} />
       </div>
     </div>
   );
@@ -1241,7 +1300,12 @@ function OrderCard({ order, isDepo }) {
               fontSize: 13,
             }}>
               <span style={{ color: textMain }}>{item.name}</span>
-              <span style={{ color: green, fontWeight: 600 }}>{item.qty} {item.unit}</span>
+              <span style={{ color: green, fontWeight: 600 }}>
+                {item.qty} {item.unit}
+                {item.originalQty && item.originalQty !== item.qty && (
+                  <span style={{ color: orange, fontSize: 10, marginLeft: 4 }}>(talep: {item.originalQty})</span>
+                )}
+              </span>
             </div>
           ))}
           {order.removedItems && order.removedItems.length > 0 && (
@@ -1269,22 +1333,29 @@ function OrderCard({ order, isDepo }) {
 
 function DepoOrderCard({ order, onApprove }) {
   const [expanded, setExpanded] = useState(false);
-  const [removedItems, setRemovedItems] = useState([]);
+  const [adjustedQtys, setAdjustedQtys] = useState({});
+  const [editingItem, setEditingItem] = useState(null);
+  const [tempVal, setTempVal] = useState("");
   const storeInfo = STORES.find(s => s.id === order.store);
   const date = new Date(order.date).toLocaleDateString("tr-TR", {
     day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
   });
 
-  const toggleRemove = (name) => {
-    setRemovedItems(prev =>
-      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
-    );
-  };
+  const getQty = (name, originalQty) => adjustedQtys.hasOwnProperty(name) ? adjustedQtys[name] : originalQty;
+  const setItemQty = (name, qty) => setAdjustedQtys(prev => ({ ...prev, [name]: Math.max(0, qty) }));
+
+  var totalApproved = 0;
+  var totalChanged = 0;
+  order.items.forEach(item => {
+    var q = getQty(item.name, item.qty);
+    if (q > 0) totalApproved++;
+    if (q !== item.qty) totalChanged++;
+  });
 
   return (
     <div style={{
       background: cardBg, borderRadius: 14,
-      border: `2px solid ${orange}30`, marginBottom: 12,
+      border: "2px solid " + orange + "30", marginBottom: 12,
       overflow: "hidden",
     }}>
       <button onClick={() => setExpanded(!expanded)}
@@ -1310,42 +1381,74 @@ function DepoOrderCard({ order, onApprove }) {
       </button>
 
       {expanded && (
-        <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${border}` }}>
+        <div style={{ padding: "0 16px 16px", borderTop: "1px solid " + border }}>
           <p style={{ fontSize: 11, color: textSub, margin: "10px 0 8px", fontFamily: font }}>
-            Stokta olmayan ürünlere tıklayarak çıkarın, sonra onaylayın:
+            Miktarı değiştirmek için rakama dokunun. 0 yaparsanız ürün iptal olur:
           </p>
           {order.items.map((item, i) => {
-            const isRemoved = removedItems.includes(item.name);
+            var currentQty = getQty(item.name, item.qty);
+            var isRemoved = currentQty === 0;
+            var isChanged = currentQty !== item.qty;
+            var isEditing = editingItem === item.name;
             return (
-              <button key={i} onClick={() => toggleRemove(item.name)}
-                style={{
-                  width: "100%", display: "flex", justifyContent: "space-between",
-                  alignItems: "center", padding: "10px 12px",
-                  background: isRemoved ? red + "15" : "transparent",
-                  borderRadius: 8, border: `1px solid ${isRemoved ? red + "40" : "transparent"}`,
-                  marginBottom: 4, cursor: "pointer",
-                  opacity: isRemoved ? 0.5 : 1,
-                  textDecoration: isRemoved ? "line-through" : "none",
-                  textAlign: "left", transition: "all .15s",
-                }}>
-                <span style={{ fontSize: 13, color: isRemoved ? red : textMain, fontFamily: font }}>
-                  {isRemoved ? "❌ " : ""}{item.name}
-                </span>
-                <span style={{ fontSize: 13, color: isRemoved ? textSub : green, fontWeight: 600, fontFamily: font }}>
-                  {item.qty} {item.unit}
-                </span>
-              </button>
+              <div key={i} style={{
+                display: "flex", justifyContent: "space-between",
+                alignItems: "center", padding: "10px 12px",
+                background: isRemoved ? red + "15" : isChanged ? orange + "10" : "transparent",
+                borderRadius: 8, border: "1px solid " + (isRemoved ? red + "40" : isChanged ? orange + "30" : "transparent"),
+                marginBottom: 4, opacity: isRemoved ? 0.5 : 1,
+                transition: "all .15s",
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{
+                    fontSize: 13, color: isRemoved ? red : textMain, fontFamily: font,
+                    textDecoration: isRemoved ? "line-through" : "none",
+                  }}>
+                    {isRemoved ? "❌ " : ""}{item.name}
+                  </span>
+                  {isChanged && !isRemoved && (
+                    <span style={{ fontSize: 10, color: orange, marginLeft: 6, fontFamily: font }}>
+                      ({item.qty}→{currentQty})
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                  <button onClick={() => setItemQty(item.name, currentQty - 1)}
+                    style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid " + border, background: "transparent", color: textSub, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font }}>−</button>
+                  {isEditing ? (
+                    <input type="number" value={tempVal}
+                      autoFocus
+                      onChange={e => setTempVal(e.target.value)}
+                      onBlur={() => { var v = parseInt(tempVal); setItemQty(item.name, v >= 0 ? v : 0); setEditingItem(null); }}
+                      onKeyDown={e => { if (e.key === "Enter") { var v = parseInt(tempVal); setItemQty(item.name, v >= 0 ? v : 0); setEditingItem(null); } }}
+                      style={{
+                        width: 44, height: 28, textAlign: "center", borderRadius: 6,
+                        border: "1px solid " + gold, background: darkBg, color: green,
+                        fontSize: 13, fontWeight: 700, fontFamily: font,
+                      }} />
+                  ) : (
+                    <span onClick={() => { setTempVal(String(currentQty)); setEditingItem(item.name); }}
+                      style={{
+                        fontSize: 13, fontWeight: 600, minWidth: 32, textAlign: "center",
+                        color: isRemoved ? red : green, cursor: "pointer", padding: "2px 4px",
+                        borderBottom: "1px dashed " + gold + "40", fontFamily: font,
+                      }}>{currentQty} {item.unit}</span>
+                  )}
+                  <button onClick={() => setItemQty(item.name, currentQty + 1)}
+                    style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid " + green + "40", background: green + "10", color: green, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font }}>+</button>
+                </div>
+              </div>
             );
           })}
 
-          <button onClick={() => onApprove(order.id, removedItems)}
+          <button onClick={() => onApprove(order.id, adjustedQtys)}
             style={{
               width: "100%", padding: "14px", borderRadius: 12,
-              background: `linear-gradient(135deg, ${green}, #059669)`,
+              background: "linear-gradient(135deg, " + green + ", #059669)",
               border: "none", color: "#000", fontSize: 15, fontWeight: 700,
               cursor: "pointer", fontFamily: font, marginTop: 12,
             }}>
-            ✅ TALEBİ ONAYLA {removedItems.length > 0 ? `(${order.items.length - removedItems.length}/${order.items.length} ürün)` : ""}
+            ✅ TALEBİ ONAYLA {totalChanged > 0 ? "(" + totalApproved + "/" + order.items.length + " ürün)" : ""}
           </button>
         </div>
       )}
