@@ -1,10 +1,10 @@
-const CACHE_NAME = 'ramex-portal-v1';
+const CACHE_NAME = 'ramex-portal-v2';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png'
+  '/ramex-portal/',
+  '/ramex-portal/index.html',
+  '/ramex-portal/manifest.json',
+  '/ramex-portal/icon-192.png',
+  '/ramex-portal/icon-512.png'
 ];
 
 self.addEventListener('install', e => {
