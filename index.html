@@ -346,30 +346,28 @@ function App() {
   const exportToCSV = () => {
     const approved = orders.filter(o => o.status === "approved");
     if (approved.length === 0) { notify("Dışa aktarılacak veri yok", "error"); return; }
-    let csv = "\uFEFF"; // BOM for Turkish chars
-    csv += "Talep Tarihi\tMağaza\tÜrün Adı\tBirim\tMiktar\tDurum\n";
+    let csv = "\uFEFF";
+    csv += "Talep Tarihi;Magaza;Urun Adi;Birim;Miktar;Durum\n";
     approved.forEach(o => {
       var dt = new Date(o.approvedDate || o.date);
-      var d = ("0"+dt.getDate()).slice(-2) + "." + ("0"+(dt.getMonth()+1)).slice(-2) + "." + dt.getFullYear();
-      var saat = ("0"+dt.getHours()).slice(-2) + ":" + ("0"+dt.getMinutes()).slice(-2);
-      var tarih = d + " " + saat;
+      var tarih = ("0"+dt.getDate()).slice(-2) + "." + ("0"+(dt.getMonth()+1)).slice(-2) + "." + dt.getFullYear() + " " + ("0"+dt.getHours()).slice(-2) + ":" + ("0"+dt.getMinutes()).slice(-2);
       o.items.forEach(item => {
-        csv += tarih + "\t" + o.storeName + "\t" + item.name + "\t" + item.unit + "\t" + item.qty + "\tOnaylandı\n";
+        csv += tarih + ";" + o.storeName + ";" + item.name + ";" + item.unit + ";" + item.qty + ";Onaylandi\n";
       });
       if (o.removedItems) {
         o.removedItems.forEach(item => {
-          csv += tarih + "\t" + o.storeName + "\t" + item.name + "\t" + item.unit + "\t" + item.qty + "\tStokta Yok\n";
+          csv += tarih + ";" + o.storeName + ";" + item.name + ";" + item.unit + ";" + item.qty + ";Stokta Yok\n";
         });
       }
     });
-    const blob = new Blob([csv], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "talep_rapor_" + new Date().toISOString().slice(0, 7) + ".xls";
+    a.download = "talep_rapor_" + new Date().toISOString().slice(0, 7) + ".csv";
     a.click();
     URL.revokeObjectURL(url);
-    notify("Excel dosyası indirildi!");
+    notify("Rapor indirildi!");
   };
 
   // Reset data
