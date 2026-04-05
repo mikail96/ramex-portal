@@ -11,19 +11,7 @@ firebase.initializeApp({
   appId: "1:698447969770:web:283765641281ced3af8693"
 });
 
-var messaging = firebase.messaging();
-
-messaging.onBackgroundMessage(function(payload) {
-  var n = payload.notification || {};
-  var title = n.title || 'RAMEX Portal';
-  var options = {
-    body: n.body || 'Yeni bildirim',
-    icon: 'icon-192.png',
-    badge: 'icon-192.png',
-    vibrate: [200, 100, 200],
-  };
-  return self.registration.showNotification(title, options);
-});
+firebase.messaging();
 
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
@@ -35,7 +23,7 @@ self.addEventListener('notificationclick', function(event) {
   );
 });
 
-var CACHE_NAME = 'ramex-portal-v3';
+var CACHE_NAME = 'ramex-portal-v4';
 var ASSETS = [
   '/ramex-portal/',
   '/ramex-portal/index.html',
