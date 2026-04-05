@@ -39,28 +39,32 @@ firebase.initializeApp(firebaseConfig);
 var VAPID_KEY = "BJ4raGJVPdRLOJ9Rya3XbTZBBt2REvfL9xB8-D1BmCaoqo2dB-irSt6VYUdqLZKwGnZh_FjgqEb5Mf7eT67wOro";
 
 // Service Worker (PWA + FCM)
+var swRegistration = null;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(function(reg) {
-    firebase.messaging().useServiceWorker(reg);
+    swRegistration = reg;
   }).catch(function(){});
 }
 
 // Request push notification permission and save token
 function requestPushPermission(userId) {
-  if (!('Notification' in window)) return;
-  var messaging = firebase.messaging();
+  if (!('Notification' in window) || !swRegistration) return;
   Notification.requestPermission().then(function(permission) {
     if (permission === 'granted') {
-      messaging.getToken({ vapidKey: VAPID_KEY }).then(function(token) {
+      firebase.messaging().getToken({ 
+        vapidKey: VAPID_KEY,
+        serviceWorkerRegistration: swRegistration 
+      }).then(function(token) {
         if (token) {
           firebase.database().ref("fcmTokens/" + userId).set(token);
+          console.log("FCM token saved for", userId);
         }
-      }).catch(function(){});
+      }).catch(function(err){ console.error("FCM token error:", err); });
     }
   }).catch(function(){});
   
   // Foreground message handler
-  messaging.onMessage(function(payload) {
+  firebase.messaging().onMessage(function(payload) {
     var n = payload.notification || {};
     if (document.getElementById("fcm-toast")) return;
     var div = document.createElement("div");
@@ -327,7 +331,7 @@ function App() {
       if (user === u.user && pass === u.pass) {
         setScreen("store");
         setLoginError("");
-        requestPushPermission(store.id);
+        setTimeout(function() { requestPushPermission(store.id); }, 1500);
       } else {
         setLoginError("Kullanıcı adı veya şifre hatalı");
       }
@@ -335,7 +339,7 @@ function App() {
       if (user === users.depo.user && pass === users.depo.pass) {
         setScreen("depo");
         setLoginError("");
-        requestPushPermission("depo");
+        setTimeout(function() { requestPushPermission("depo"); }, 1500);
       } else {
         setLoginError("Kullanıcı adı veya şifre hatalı");
       }
@@ -382,6 +386,23 @@ function App() {
       if (!a.read) firebase.database().ref("alerts/" + a.id + "/read").set(true);
     });
   };
+
+  var clearMyAlerts = function() {
+    myAlerts.forEach(function(a) {
+      firebase.database().ref("alerts/" + a.id).remove();
+    });
+    setShowAlerts(false);
+  };
+
+  // Auto-cleanup alerts older than 7 days
+  useEffect(function() {
+    var cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    alerts.forEach(function(a) {
+      if (a.time && a.time < cutoff) {
+        firebase.database().ref("alerts/" + a.id).remove();
+      }
+    });
+  }, [alerts]);
 
   // Submit order
   const submitOrder = () => {
@@ -729,12 +750,17 @@ function App() {
           <div style={{ padding: "12px 16px", background: cardBg2, borderBottom: `1px solid ${border}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: gold, fontFamily: font }}>🔔 Bildirimler</span>
-              <button onClick={() => setShowAlerts(false)} style={{ background: "none", border: "none", color: textSub, cursor: "pointer", fontSize: 16 }}>✕</button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {myAlerts.length > 0 && (
+                  <button onClick={clearMyAlerts} style={{ background: "none", border: "none", color: red, cursor: "pointer", fontSize: 11, fontFamily: font }}>Temizle</button>
+                )}
+                <button onClick={() => setShowAlerts(false)} style={{ background: "none", border: "none", color: textSub, cursor: "pointer", fontSize: 16 }}>✕</button>
+              </div>
             </div>
             {myAlerts.length === 0 ? (
               <p style={{ fontSize: 12, color: textSub, textAlign: "center", padding: "12px 0", fontFamily: font }}>Bildirim yok</p>
             ) : (
-              myAlerts.slice(0, 10).map(a => (
+              myAlerts.slice(0, 20).map(a => (
                 <div key={a.id} style={{
                   padding: "8px 10px", background: a.read ? "transparent" : gold + "10",
                   borderRadius: 8, marginBottom: 4, border: `1px solid ${a.read ? "transparent" : gold + "20"}`,
@@ -942,12 +968,17 @@ function App() {
           <div style={{ padding: "12px 16px", background: cardBg2, borderBottom: `1px solid ${border}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: gold, fontFamily: font }}>🔔 Bildirimler</span>
-              <button onClick={() => setShowAlerts(false)} style={{ background: "none", border: "none", color: textSub, cursor: "pointer", fontSize: 16 }}>✕</button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {myAlerts.length > 0 && (
+                  <button onClick={clearMyAlerts} style={{ background: "none", border: "none", color: red, cursor: "pointer", fontSize: 11, fontFamily: font }}>Temizle</button>
+                )}
+                <button onClick={() => setShowAlerts(false)} style={{ background: "none", border: "none", color: textSub, cursor: "pointer", fontSize: 16 }}>✕</button>
+              </div>
             </div>
             {myAlerts.length === 0 ? (
               <p style={{ fontSize: 12, color: textSub, textAlign: "center", padding: "12px 0", fontFamily: font }}>Bildirim yok</p>
             ) : (
-              myAlerts.slice(0, 10).map(a => (
+              myAlerts.slice(0, 20).map(a => (
                 <div key={a.id} style={{
                   padding: "8px 10px", background: a.read ? "transparent" : gold + "10",
                   borderRadius: 8, marginBottom: 4, border: `1px solid ${a.read ? "transparent" : gold + "20"}`,
