@@ -53,6 +53,10 @@ input:focus,select:focus{outline:none;border-color:#d4a844!important}
 select{appearance:auto}
 *::-webkit-scrollbar{display:none}
 *{scrollbar-width:none}
+*{-webkit-tap-highlight-color:transparent}
+button,a,input,select,div{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+input[type="number"]::-webkit-inner-spin-button,input[type="number"]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+input[type="number"]{-moz-appearance:textfield}
 </style>
 </head>
 <body>
@@ -159,6 +163,9 @@ function App() {
   const [editPass, setEditPass] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showCustom, setShowCustom] = useState(false);
+  const [alerts, setAlerts] = useState([]);
+  const [showAlerts, setShowAlerts] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const catScrollRef = useRef(null);
 
   // Merged products list (base - hidden + custom)
@@ -192,6 +199,10 @@ function App() {
     });
     db.ref("users").on("value", function(snap) {
       if (snap.val()) setUsers(snap.val());
+    });
+    db.ref("alerts").on("value", function(snap) {
+      var val = snap.val();
+      setAlerts(val ? Object.values(val).sort(function(a,b) { return b.time - a.time; }) : []);
     });
     return function() { db.ref().off(); };
   }, []);
@@ -314,6 +325,30 @@ function App() {
   const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
   const cartItems = Object.entries(cart).map(([idx, qty]) => ({ ...products[idx], idx: +idx, qty }));
 
+  // Send alert
+  var sendAlert = function(target, msg, icon) {
+    var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    firebase.database().ref("alerts/" + id).set({
+      id: id, target: target, msg: msg, icon: icon || "📋",
+      time: Date.now(), read: false,
+    });
+  };
+
+  // My alerts (filtered by role)
+  var myAlerts = useMemo(function() {
+    if (role === "depo") return alerts.filter(function(a) { return a.target === "depo"; });
+    if (role === "store" && store) return alerts.filter(function(a) { return a.target === store.id; });
+    return [];
+  }, [alerts, role, store]);
+
+  var unreadCount = myAlerts.filter(function(a) { return !a.read; }).length;
+
+  var markAlertsRead = function() {
+    myAlerts.forEach(function(a) {
+      if (!a.read) firebase.database().ref("alerts/" + a.id + "/read").set(true);
+    });
+  };
+
   // Submit order
   const submitOrder = () => {
     if (cartItems.length === 0) return;
@@ -328,6 +363,7 @@ function App() {
     };
     const newOrders = [order, ...orders];
     saveOrders(newOrders);
+    sendAlert("depo", store.name + " yeni ürün talebi gönderdi (" + cartItems.length + " ürün)", "🔔");
     setCart({});
     setShowCart(false);
     setTimeout(() => {
@@ -338,8 +374,12 @@ function App() {
 
   // Depo: approve order with adjusted quantities
   const approveOrder = (orderId, adjustedQtys) => {
+    var targetStore = "";
+    var storeName = "";
     const newOrders = orders.map(o => {
       if (o.id === orderId) {
+        targetStore = o.store;
+        storeName = o.storeName;
         var approved = [];
         var removed = [];
         o.items.forEach(item => {
@@ -361,7 +401,23 @@ function App() {
       return o;
     });
     saveOrders(newOrders);
+    sendAlert(targetStore, "Ürün talebiniz onaylandı! ✅", "✅");
     notify("Talep onaylandı!");
+  };
+
+  // Depo: reject order
+  const rejectOrder = (orderId) => {
+    var targetStore = "";
+    const newOrders = orders.map(o => {
+      if (o.id === orderId) {
+        targetStore = o.store;
+        return { ...o, status: "rejected", rejectedDate: new Date().toISOString() };
+      }
+      return o;
+    });
+    saveOrders(newOrders);
+    sendAlert(targetStore, "Ürün talebiniz reddedildi ❌", "❌");
+    notify("Talep reddedildi");
   };
 
   // Export to CSV (Excel uyumlu)
@@ -392,10 +448,11 @@ function App() {
     notify("Rapor indirildi!");
   };
 
-  // Reset data
+  // Reset data (actual reset after confirmation)
   const resetData = () => {
-    
-      saveOrders([]);
+    saveOrders([]);
+    firebase.database().ref("alerts").remove();
+    setConfirmReset(false);
     notify("Veriler sıfırlandı");
   };
 
@@ -597,24 +654,66 @@ function App() {
               <div style={{ fontSize: 11, color: textSub, fontFamily: font }}>Talep Sistemi</div>
             </div>
           </div>
-          <button onClick={() => setShowCart(!showCart)}
-            style={{
-              position: "relative", background: cardBg, border: `1px solid ${border}`,
-              borderRadius: 12, padding: "10px 14px", cursor: "pointer",
-              animation: cartCount > 0 ? "cartPulse .4s ease" : "none",
-            }}>
-            <span style={{ fontSize: 22 }}>🛒</span>
-            {cartCount > 0 && (
-              <span style={{
-                position: "absolute", top: -6, right: -6,
-                background: red, color: "#fff", fontSize: 11, fontWeight: 700,
-                width: 22, height: 22, borderRadius: 11,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                animation: "bounceIn .3s ease",
-              }}>{cartCount}</span>
-            )}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => { setShowAlerts(!showAlerts); if (!showAlerts) markAlertsRead(); }}
+              style={{
+                position: "relative", background: cardBg, border: `1px solid ${border}`,
+                borderRadius: 12, padding: "10px 12px", cursor: "pointer",
+              }}>
+              <span style={{ fontSize: 20 }}>🔔</span>
+              {unreadCount > 0 && (
+                <span style={{
+                  position: "absolute", top: -6, right: -6,
+                  background: orange, color: "#000", fontSize: 10, fontWeight: 700,
+                  width: 20, height: 20, borderRadius: 10,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>{unreadCount}</span>
+              )}
+            </button>
+            <button onClick={() => setShowCart(!showCart)}
+              style={{
+                position: "relative", background: cardBg, border: `1px solid ${border}`,
+                borderRadius: 12, padding: "10px 14px", cursor: "pointer",
+                animation: cartCount > 0 ? "cartPulse .4s ease" : "none",
+              }}>
+              <span style={{ fontSize: 22 }}>🛒</span>
+              {cartCount > 0 && (
+                <span style={{
+                  position: "absolute", top: -6, right: -6,
+                  background: red, color: "#fff", fontSize: 11, fontWeight: 700,
+                  width: 22, height: 22, borderRadius: 11,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  animation: "bounceIn .3s ease",
+                }}>{cartCount}</span>
+              )}
+            </button>
+          </div>
         </div>
+
+        {/* Alerts Panel */}
+        {showAlerts && (
+          <div style={{ padding: "12px 16px", background: cardBg2, borderBottom: `1px solid ${border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: gold, fontFamily: font }}>🔔 Bildirimler</span>
+              <button onClick={() => setShowAlerts(false)} style={{ background: "none", border: "none", color: textSub, cursor: "pointer", fontSize: 16 }}>✕</button>
+            </div>
+            {myAlerts.length === 0 ? (
+              <p style={{ fontSize: 12, color: textSub, textAlign: "center", padding: "12px 0", fontFamily: font }}>Bildirim yok</p>
+            ) : (
+              myAlerts.slice(0, 10).map(a => (
+                <div key={a.id} style={{
+                  padding: "8px 10px", background: a.read ? "transparent" : gold + "10",
+                  borderRadius: 8, marginBottom: 4, border: `1px solid ${a.read ? "transparent" : gold + "20"}`,
+                }}>
+                  <div style={{ fontSize: 12, color: textMain, fontFamily: font }}>{a.icon} {a.msg}</div>
+                  <div style={{ fontSize: 10, color: textSub, fontFamily: font, marginTop: 2 }}>
+                    {new Date(a.time).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: `1px solid ${border}` }}>
@@ -756,6 +855,7 @@ function App() {
   if (screen === "depo") {
     const pending = orders.filter(o => o.status === "pending");
     const approved = orders.filter(o => o.status === "approved");
+    const rejected = orders.filter(o => o.status === "rejected");
 
     return (
       <div style={baseStyle}>
@@ -786,9 +886,47 @@ function App() {
               <div style={{ fontSize: 11, color: textSub, fontFamily: font }}>Yönetim & Kontrol</div>
             </div>
           </div>
+          <button onClick={() => { setShowAlerts(!showAlerts); if (!showAlerts) markAlertsRead(); }}
+            style={{
+              position: "relative", background: cardBg, border: `1px solid ${border}`,
+              borderRadius: 12, padding: "10px 12px", cursor: "pointer",
+            }}>
+            <span style={{ fontSize: 20 }}>🔔</span>
+            {unreadCount > 0 && (
+              <span style={{
+                position: "absolute", top: -6, right: -6,
+                background: orange, color: "#000", fontSize: 10, fontWeight: 700,
+                width: 20, height: 20, borderRadius: 10,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>{unreadCount}</span>
+            )}
+          </button>
         </div>
 
-        {/* Stats */}
+        {/* Alerts Panel */}
+        {showAlerts && (
+          <div style={{ padding: "12px 16px", background: cardBg2, borderBottom: `1px solid ${border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: gold, fontFamily: font }}>🔔 Bildirimler</span>
+              <button onClick={() => setShowAlerts(false)} style={{ background: "none", border: "none", color: textSub, cursor: "pointer", fontSize: 16 }}>✕</button>
+            </div>
+            {myAlerts.length === 0 ? (
+              <p style={{ fontSize: 12, color: textSub, textAlign: "center", padding: "12px 0", fontFamily: font }}>Bildirim yok</p>
+            ) : (
+              myAlerts.slice(0, 10).map(a => (
+                <div key={a.id} style={{
+                  padding: "8px 10px", background: a.read ? "transparent" : gold + "10",
+                  borderRadius: 8, marginBottom: 4, border: `1px solid ${a.read ? "transparent" : gold + "20"}`,
+                }}>
+                  <div style={{ fontSize: 12, color: textMain, fontFamily: font }}>{a.icon} {a.msg}</div>
+                  <div style={{ fontSize: 10, color: textSub, fontFamily: font, marginTop: 2 }}>
+                    {new Date(a.time).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 10, padding: "16px" }}>
           {[
             { label: "Bekleyen", val: pending.length, color: orange, icon: "⏳" },
@@ -833,7 +971,7 @@ function App() {
               </div>
             ) : (
               pending.map(order => (
-                <DepoOrderCard key={order.id} order={order} onApprove={approveOrder} />
+                <DepoOrderCard key={order.id} order={order} onApprove={approveOrder} onReject={rejectOrder} />
               ))
             )
           )}
@@ -1077,16 +1215,41 @@ function App() {
                 📥 Excel'e Aktar (CSV)
               </button>
 
-              <button onClick={resetData}
-                style={{
-                  width: "100%", padding: "16px", borderRadius: 14,
-                  background: "transparent", border: `2px solid ${red}`,
-                  color: red, fontSize: 15, fontWeight: 700,
-                  cursor: "pointer", fontFamily: font, marginBottom: 20,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              {!confirmReset ? (
+                <button onClick={() => setConfirmReset(true)}
+                  style={{
+                    width: "100%", padding: "16px", borderRadius: 14,
+                    background: "transparent", border: `2px solid ${red}`,
+                    color: red, fontSize: 15, fontWeight: 700,
+                    cursor: "pointer", fontFamily: font, marginBottom: 20,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  }}>
+                  🗑 Tüm Verileri Sıfırla
+                </button>
+              ) : (
+                <div style={{
+                  padding: "16px", background: red + "10", borderRadius: 14,
+                  border: `2px solid ${red}40`, marginBottom: 20,
                 }}>
-                🗑 Tüm Verileri Sıfırla
-              </button>
+                  <p style={{ fontSize: 13, color: textMain, fontFamily: font, marginBottom: 12, textAlign: "center" }}>
+                    ⚠️ Tüm talepler ve bildirimler silinecek. Emin misiniz?
+                  </p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={resetData}
+                      style={{
+                        flex: 1, padding: "12px", borderRadius: 10,
+                        background: red, border: "none", color: "#fff",
+                        fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: font,
+                      }}>Evet, Sıfırla</button>
+                    <button onClick={() => setConfirmReset(false)}
+                      style={{
+                        flex: 1, padding: "12px", borderRadius: 10,
+                        background: "transparent", border: `1px solid ${border}`,
+                        color: textSub, fontSize: 14, cursor: "pointer", fontFamily: font,
+                      }}>İptal</button>
+                  </div>
+                </div>
+              )}
 
               <div style={{ padding: "16px", background: cardBg, borderRadius: 14, border: `1px solid ${border}`, marginBottom: 12 }}>
                 <h4 style={{ color: gold, fontSize: 14, fontWeight: 700, marginBottom: 14, fontFamily: font }}>🔐 Giriş Bilgileri</h4>
@@ -1287,11 +1450,11 @@ function OrderCard({ order, isDepo }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{
             padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-            background: order.status === "approved" ? green + "20" : orange + "20",
-            color: order.status === "approved" ? green : orange,
+            background: order.status === "approved" ? green + "20" : order.status === "rejected" ? red + "20" : orange + "20",
+            color: order.status === "approved" ? green : order.status === "rejected" ? red : orange,
             fontFamily: font,
           }}>
-            {order.status === "approved" ? "✅ Onaylandı" : "⏳ Bekliyor"}
+            {order.status === "approved" ? "✅ Onaylandı" : order.status === "rejected" ? "❌ Reddedildi" : "⏳ Bekliyor"}
           </span>
           <span style={{ color: textSub, fontSize: 14, transform: expanded ? "rotate(180deg)" : "none", transition: "transform .2s" }}>▼</span>
         </div>
@@ -1336,7 +1499,7 @@ function OrderCard({ order, isDepo }) {
   );
 }
 
-function DepoOrderCard({ order, onApprove }) {
+function DepoOrderCard({ order, onApprove, onReject }) {
   const [expanded, setExpanded] = useState(false);
   const [adjustedQtys, setAdjustedQtys] = useState({});
   const [editingItem, setEditingItem] = useState(null);
@@ -1446,15 +1609,26 @@ function DepoOrderCard({ order, onApprove }) {
             );
           })}
 
-          <button onClick={() => onApprove(order.id, adjustedQtys)}
-            style={{
-              width: "100%", padding: "14px", borderRadius: 12,
-              background: "linear-gradient(135deg, " + green + ", #059669)",
-              border: "none", color: "#000", fontSize: 15, fontWeight: 700,
-              cursor: "pointer", fontFamily: font, marginTop: 12,
-            }}>
-            ✅ TALEBİ ONAYLA {totalChanged > 0 ? "(" + totalApproved + "/" + order.items.length + " ürün)" : ""}
-          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button onClick={() => onApprove(order.id, adjustedQtys)}
+              style={{
+                flex: 2, padding: "14px", borderRadius: 12,
+                background: "linear-gradient(135deg, " + green + ", #059669)",
+                border: "none", color: "#000", fontSize: 14, fontWeight: 700,
+                cursor: "pointer", fontFamily: font,
+              }}>
+              ✅ ONAYLA {totalChanged > 0 ? "(" + totalApproved + "/" + order.items.length + ")" : ""}
+            </button>
+            <button onClick={() => onReject(order.id)}
+              style={{
+                flex: 1, padding: "14px", borderRadius: 12,
+                background: "transparent", border: "2px solid " + red,
+                color: red, fontSize: 14, fontWeight: 700,
+                cursor: "pointer", fontFamily: font,
+              }}>
+              ❌ REDDET
+            </button>
+          </div>
         </div>
       )}
     </div>
